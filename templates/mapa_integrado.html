@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Explorar Mapa | ForLiveRunning</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            dark: '#0f172a', // Slate 900
+                            darker: '#020617',
+                            surface: '#1e293b',
+                            accent: '#f97316',
+                            accentHover: '#ea580c',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Estilos integrados para mapa + lista */
+        body { background-color: #0f172a; color: white; overflow: hidden; }
+        .leaflet-tile { filter: contrast(110%) brightness(70%) invert(100%) hue-rotate(180deg) saturate(150%); }
+        .leaflet-container { background: #0f172a; }
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .custom-popup .leaflet-popup-content-wrapper { background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); color: white; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 0; }
+        .custom-popup .leaflet-popup-tip { background: rgba(15, 23, 42, 0.95); }
+        .leaflet-popup-close-button { display: none; }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col md:flex-row">
+
+    <!-- LISTA LATERAL -->
+    <aside id="list-panel" class="w-full md:w-1/3 lg:w-1/4 bg-brand-surface border-r border-white/5 flex flex-col h-[calc(100vh-60px)] md:h-screen z-20 hidden md:flex relative transition-all duration-300">
+        <div class="p-6 border-b border-white/5 bg-brand-dark/50 backdrop-blur-sm">
+            <div class="flex items-center gap-3 mb-1">
+                <i class="ph-fill ph-map-trifold text-brand-accent text-2xl"></i>
+                <h1 class="font-bold text-lg tracking-wide">Mis Rutas</h1>
+            </div>
+            <p class="text-xs text-gray-400">Puntos sincronizados: <span id="points-count" class="text-white font-mono">0</span></p>
+        </div>
+
+        <div id="points-list" class="flex-1 overflow-y-auto custom-scroll p-4 space-y-3">
+            <div id="empty-state" class="flex flex-col items-center justify-center h-64 text-gray-500 opacity-60">
+                <i class="ph-duotone ph-map-pin text-5xl mb-3"></i>
+                <p class="text-sm">No hay puntos guardados.</p>
+                <p class="text-xs">Toca el mapa para agregar.</p>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-white/5 text-center text-[10px] text-gray-600 uppercase tracking-widest">ForLiveRunning System v2.0</div>
+    </aside>
+
+    <!-- MAPA PRINCIPAL -->
+    <main class="flex-1 relative h-[calc(100vh-60px)] md:h-screen w-full">
+        <div id="map" class="h-full w-full z-0"></div>
+
+        <div class="absolute bottom-8 right-6 z-[400] flex flex-col gap-3 pointer-events-none">
+            <div class="bg-brand-surface/90 backdrop-blur border border-white/10 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto">
+                <button id="zoom-in-btn" aria-label="Acercar mapa" class="p-4 hover:bg-white/10 active:bg-white/20 text-white border-b border-white/10 transition flex items-center justify-center">
+                    <i class="ph-bold ph-plus"></i>
+                </button>
+                <button id="zoom-out-btn" aria-label="Alejar mapa" class="p-4 hover:bg-white/10 active:bg-white/20 text-white transition flex items-center justify-center">
+                    <i class="ph-bold ph-minus"></i>
+                </button>
+            </div>
+            <button id="gps-btn" aria-label="Ubicar mi posición" class="pointer-events-auto bg-brand-accent hover:bg-brand-accentHover text-white w-14 h-14 rounded-2xl shadow-glow flex items-center justify-center transition transform active:scale-95">
+                <i class="ph-fill ph-navigation-arrow text-2xl"></i>
+            </button>
+        </div>
+
+        <div id="toast-container" class="absolute top-6 left-1/2 transform -translate-x-1/2 z-[1000] w-max pointer-events-none"></div>
+    </main>
+
+    <!-- NAV MÓVIL -->
+    <nav class="md:hidden fixed bottom-0 left-0 w-full h-[60px] bg-brand-darker border-t border-white/10 flex justify-around items-center z-50">
+        <button onclick="switchTab('map')" id="tab-map" aria-label="Ver Mapa" class="flex flex-col items-center justify-center w-1/2 h-full text-brand-accent transition-colors">
+            <i class="ph-fill ph-map-trifold text-2xl mb-1"></i>
+            <span class="text-[10px] font-medium">Mapa</span>
+        </button>
+        <button onclick="switchTab('list')" id="tab-list" aria-label="Ver Lista" class="flex flex-col items-center justify-center w-1/2 h-full text-gray-500 hover:text-white transition-colors">
+            <i class="ph-fill ph-list-dashes text-2xl mb-1"></i>
+            <span class="text-[10px] font-medium">Lista</span>
+        </button>
+    </nav>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        const state = { points: [], markers: {}, currentView: 'map' };
+
+        const map = L.map('map', { zoomControl: false }).setView([32.5149, -117.0382], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19, className: 'map-tiles' }).addTo(map);
+
+        function createIcon(type) {
+            const colors = { pending: 'bg-gray-500 border-gray-300', loading: 'bg-blue-500 border-blue-200 animate-pulse', saved: 'bg-brand-accent border-orange-200 shadow-glow' };
+            const icons = { pending: '<i class="ph-bold ph-question text-white"></i>', loading: '<i class="ph-bold ph-spinner animate-spin text-white"></i>', saved: '<i class="ph-fill ph-map-pin text-white"></i>' };
+            return L.divIcon({ className: 'custom-pin-base', html: `
+                    <div class="relative w-8 h-8 flex items-center justify-center group transition-transform hover:scale-110">
+                        <div class="absolute w-full h-full rounded-full ${colors[type]} border-2 flex items-center justify-center z-10 transition-colors">
+                            ${icons[type]}
+                        </div>
+                        <div class="absolute -bottom-1 w-3 h-3 ${colors[type]} rotate-45 transform origin-center z-0"></div>
+                        <div class="absolute -bottom-4 w-8 h-2 bg-black/50 blur-sm rounded-full"></div>
+                    </div>
+                `, iconSize: [32, 42], iconAnchor: [16, 42], popupAnchor: [0, -45] });
+        }
+
+        let tempMarker = null;
+
+        map.on('click', (e) => {
+            if (tempMarker) map.removeLayer(tempMarker);
+            const { lat, lng } = e.latlng;
+            tempMarker = L.marker([lat, lng], { icon: createIcon('pending') }).addTo(map);
+            const popupContent = document.createElement('div');
+            popupContent.className = 'text-center p-4 w-48';
+            popupContent.innerHTML = `
+                <div class="font-bold text-sm text-white mb-1">Nueva ubicación</div>
+                <div class="text-[10px] font-mono text-gray-400 mb-3">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+                <div class="flex gap-2">
+                    <button id="btn-cancel" class="flex-1 bg-white/10 hover:bg-white/20 py-2 rounded text-xs text-white">Cancelar</button>
+                    <button id="btn-save" class="flex-1 bg-brand-accent hover:bg-brand-accentHover py-2 rounded text-xs text-white font-bold shadow-lg">Guardar</button>
+                </div>
+            `;
+
+            const btnCancel = popupContent.querySelector('#btn-cancel');
+            const btnSave = popupContent.querySelector('#btn-save');
+            if (btnCancel) btnCancel.addEventListener('click', () => { if (tempMarker) map.removeLayer(tempMarker); tempMarker = null; });
+            if (btnSave) btnSave.addEventListener('click', () => savePointLogic(tempMarker, lat, lng));
+
+            tempMarker.bindPopup(popupContent, { className: 'custom-popup', closeButton: false, autoClose: false, closeOnClick: false }).openPopup();
+        });
+
+        async function savePointLogic(markerRef, lat, lng) {
+            if (!markerRef) return;
+            try { markerRef.closePopup(); markerRef.setIcon(createIcon('loading')); } catch (e) {}
+            const loadingToast = showToast('Sincronizando...', 'loading');
+            try {
+                const res = await fetch('/guardar_punto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat, lng }) });
+                if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message || 'Error del servidor'); }
+                const payload = await res.json();
+                const saved = payload.point;
+                try { map.removeLayer(markerRef); } catch (e) {}
+                if (markerRef === tempMarker) tempMarker = null;
+                const finalMarker = L.marker([saved.lat, saved.lng], { icon: createIcon('saved') }).addTo(map);
+                finalMarker.bindPopup(`<div class="p-2 text-center text-sm font-bold">${saved.address}</div>`, { className: 'custom-popup' });
+                state.markers[saved.id] = finalMarker;
+                state.points.push({ id: saved.id, lat: saved.lat, lng: saved.lng, timestamp: saved.timestamp, address: saved.address });
+                renderList(); loadingToast.remove(); showToast('¡Guardado en lista!', 'success');
+            } catch (error) {
+                console.error('Guardar punto falló:', error);
+                try { map.removeLayer(markerRef); } catch (e) {}
+                if (markerRef === tempMarker) tempMarker = null;
+                loadingToast.remove(); showToast('Error al guardar. Intenta de nuevo.', 'error');
+            }
+        }
+
+        function renderList() {
+            const listContainer = document.getElementById('points-list');
+            const countLabel = document.getElementById('points-count');
+            countLabel.textContent = state.points.length;
+            listContainer.innerHTML = '';
+            if (state.points.length === 0) {
+                const emptyState = document.createElement('div');
+                emptyState.className = 'flex flex-col items-center justify-center h-64 text-gray-500 opacity-60';
+                emptyState.innerHTML = `<i class="ph-duotone ph-map-pin text-5xl mb-3"></i><p class="text-sm">No hay puntos guardados.</p><p class="text-xs">Toca el mapa para agregar.</p>`;
+                listContainer.appendChild(emptyState);
+                return;
+            }
+            [...state.points].reverse().forEach(point => {
+                const card = document.createElement('div');
+                card.className = 'bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl p-4 cursor-pointer transition-all duration-200 group relative overflow-hidden';
+                card.setAttribute('role', 'button');
+                card.setAttribute('aria-label', `Ver ubicación de ${point.address}`);
+                card.innerHTML = `
+                    <div class="absolute left-0 top-0 h-full w-1 bg-brand-accent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="font-bold text-brand-accent text-sm group-hover:translate-x-1 transition-transform">${point.address}</span>
+                        <span class="text-[10px] text-gray-500 bg-black/20 px-2 py-0.5 rounded-full">${point.timestamp}</span>
+                    </div>
+                    <div class="flex items-center text-gray-400 text-xs gap-2 font-mono mt-2">
+                        <i class="ph-bold ph-crosshair text-gray-600"></i>
+                        ${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}
+                    </div>
+                `;
+                card.onclick = () => { map.flyTo([point.lat, point.lng], 16, { duration: 1.5 }); const marker = state.markers[point.id]; if (marker) setTimeout(() => marker.openPopup(), 1500); if (window.innerWidth < 768) switchTab('map'); };
+                listContainer.appendChild(card);
+            });
+        }
+
+        function switchTab(tabName) {
+            const mapPanel = document.getElementById('map').parentElement;
+            const listPanel = document.getElementById('list-panel');
+            const tabMapBtn = document.getElementById('tab-map');
+            const tabListBtn = document.getElementById('tab-list');
+            if (tabName === 'map') { mapPanel.classList.remove('hidden'); listPanel.classList.add('hidden'); tabMapBtn.className = "flex flex-col items-center justify-center w-1/2 h-full text-brand-accent transition-colors"; tabListBtn.className = "flex flex-col items-center justify-center w-1/2 h-full text-gray-500 hover:text-white transition-colors"; }
+            else { mapPanel.classList.add('hidden'); listPanel.classList.remove('hidden'); listPanel.classList.remove('md:flex'); listPanel.classList.add('flex'); tabListBtn.className = "flex flex-col items-center justify-center w-1/2 h-full text-brand-accent transition-colors"; tabMapBtn.className = "flex flex-col items-center justify-center w-1/2 h-full text-gray-500 hover:text-white transition-colors"; }
+        }
+
+        function showToast(msg, type) {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            let bg = 'bg-gray-600'; let icon = 'ph-info';
+            if (type === 'loading') { bg = 'bg-blue-600'; icon = 'ph-spinner animate-spin'; }
+            else if (type === 'success') { bg = 'bg-green-600'; icon = 'ph-check-circle'; }
+            else if (type === 'error') { bg = 'bg-red-600'; icon = 'ph-x-circle'; }
+            el.className = `${bg} text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 text-sm font-medium animate-enter mb-2 backdrop-blur-md bg-opacity-90`;
+            el.innerHTML = `<i class="ph-bold ${icon}"></i> ${msg}`;
+            container.appendChild(el);
+            if (type !== 'loading') { setTimeout(() => el.remove(), 3000); }
+            return el;
+        }
+
+        function locateUser() {
+            const loadingToast = showToast('Buscando GPS...', 'loading');
+            setTimeout(() => {
+                map.flyTo([32.53, -117.02], 15);
+                if (loadingToast && typeof loadingToast.remove === 'function') loadingToast.remove();
+                showToast('Ubicación encontrada', 'success');
+            }, 1000);
+        }
+
+        document.getElementById('zoom-in-btn').addEventListener('click', () => map.zoomIn());
+        document.getElementById('zoom-out-btn').addEventListener('click', () => map.zoomOut());
+        document.getElementById('gps-btn').addEventListener('click', locateUser);
+
+        async function loadPointsFromServer() {
+            try {
+                const res = await fetch('/puntos');
+                if (!res.ok) throw new Error('No se pudo obtener puntos');
+                const payload = await res.json();
+                const points = payload.points || [];
+                points.forEach(p => {
+                    if (state.points.find(x => x.id === p.id)) return;
+                    state.points.push(p);
+                    const m = L.marker([p.lat, p.lng], { icon: createIcon('saved') }).addTo(map);
+                    m.bindPopup(`<div class="p-2 text-center text-sm font-bold">${p.address}</div>`, { className: 'custom-popup' });
+                    state.markers[p.id] = m;
+                });
+                renderList();
+            } catch (err) {
+                console.warn('No se cargaron puntos iniciales:', err);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => { loadPointsFromServer(); window.addEventListener('resize', () => map.invalidateSize()); });
+    </script>
+</body>
+</html>
